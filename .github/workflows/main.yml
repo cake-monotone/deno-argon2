@@ -14,23 +14,22 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v1
+        uses: actions/checkout@v3
 
-      - name: Install Rust
-        uses: hecrj/setup-rust-action@v1
+      - name: Install rust with rustfmt and clippy
+        uses: actions-rs/toolchain@v1
         with:
-          rust-version: "1.50.0"
-
-      - name: Install clippy and rustfmt
-        if: matrix.kind == 'lint'
-        run: |
-          rustup component add clippy
-          rustup component add rustfmt
+          profile: minimal
+          toolchain: stable
+          components: rustfmt, clippy
 
       - name: Install Deno
-        uses: denolib/setup-deno@master
+        uses: denoland/setup-deno@v1
         with:
-          deno-version: "1.8.3"
+          deno-version: "~1.30"
+
+      - name: Install deno_bindgen
+        run: deno install -Afrq -n deno_bindgen https://deno.land/x/deno_bindgen/cli.ts
 
       - name: Log versions
         run: |
@@ -62,11 +61,19 @@ jobs:
 
       - name: Build
         if: matrix.kind == 'test'
-        run: cargo build --release --locked --all-targets
+        run: deno_bindgen --release -- --locked --all-targets
 
       - name: Test TypeScript
         if: matrix.kind == 'test'
-        run: deno run --allow-read --allow-write --allow-plugin --allow-run --allow-env --unstable tests/run.ts
+        run: deno test --allow-read --allow-write --allow-ffi --allow-run --allow-env --unstable tests/
+
+      - name: Check bindings.ts before Release
+        if: matrix.kind == 'test' && startsWith(github.ref, 'refs/tags/')
+        run: |
+          export RELEASE_VERSION=${GITHUB_REF#refs/tags/}
+          mv bindings/bindings.ts origin_bindings.ts
+          deno_bindgen --release="https://github.com/fdionisi/deno-argon2/releases/download/${RELEASE_VERSION}"
+          diff bindings/bindings.ts origin_bindings.ts
 
       - name: Release
         uses: softprops/action-gh-release@v1
