@@ -1,15 +1,17 @@
 import { HashOptions, MIN_SALT_SIZE } from "./common.ts";
 import { Argon2Error, Argon2ErrorType } from "./error.ts";
-import { dlopen, FetchOptions } from "https://deno.land/x/plug/mod.ts";
 
-const options: FetchOptions = {
-  name: "deno_argon2",
-  url: "./target/release/",
-}
-
-const library = await dlopen(options, {
-  hash: { parameters: ["buffer", "usize"], result: "pointer", nonblocking: true },
-  verify: { parameters: ["buffer", "usize"], result: "pointer", nonblocking: true },
+const lib = await Deno.dlopen("./target/release/libdeno_argon2.so", {
+  hash: {
+    parameters: ["buffer", "usize"],
+    result: "pointer",
+    nonblocking: true,
+  },
+  verify: {
+    parameters: ["buffer", "usize"],
+    result: "pointer",
+    nonblocking: true,
+  },
 });
 
 function encode(s: string): Uint8Array {
@@ -20,14 +22,10 @@ function decode(buf: Uint8Array): string {
   return new TextDecoder().decode(buf);
 }
 
-function readPointer(v: Deno.PointerValue): Uint8Array {
-  const ptr = new Deno.UnsafePointerView(v)
-  const lengthBe = new Uint8Array(4)
-  const view = new DataView(lengthBe.buffer)
-  ptr.copyInto(lengthBe, 0)
-  const buf = new Uint8Array(view.getUint32(0))
-  ptr.copyInto(buf, 4)
-  return buf
+function readBuffer(v: Deno.PointerValue): Uint8Array {
+  const ptr = new Deno.UnsafePointerView(v);
+  const len = new DataView(ptr.getArrayBuffer(4)).getUint32(0);
+  return new Uint8Array(ptr.getArrayBuffer(len, 4));
 }
 
 export async function hash(
@@ -63,15 +61,19 @@ export async function hash(
       data: options.data
         ? [...encode(JSON.stringify(options.data)).values()]
         : undefined,
-    }
+    },
   }));
 
-  const result = await library.symbols.hash(
+  const result = await lib.symbols.hash(
     args,
     args.byteLength,
   ).then(
-    r => JSON.parse(decode(readPointer(r))) as { result: Array<number>, error: string | null } 
-  )
+    (r) =>
+      JSON.parse(decode(readBuffer(r))) as {
+        result: Array<number>;
+        error: string | null;
+      },
+  );
 
   if (result.error) {
     throw new Argon2Error(
@@ -91,13 +93,17 @@ export async function verify(
   const args = encode(JSON.stringify({
     hash: hash,
     password: password,
-  }))
-  const result = await library.symbols.verify(
+  }));
+  const result = await lib.symbols.verify(
     args,
     args.byteLength,
   ).then(
-    r => JSON.parse(decode(readPointer(r))) as { result: boolean, error: string | null } 
-  )
+    (r) =>
+      JSON.parse(decode(readBuffer(r))) as {
+        result: boolean;
+        error: string | null;
+      },
+  );
 
   if (result.error) {
     throw new Argon2Error(
