@@ -1,184 +1,111 @@
-import { prepare } from "./deps.ts";
-
 import { HashOptions, MIN_SALT_SIZE } from "./common.ts";
 import { Argon2Error, Argon2ErrorType } from "./error.ts";
+import { dlopen, FetchOptions } from "https://deno.land/x/plug/mod.ts";
 
-let encoder = new TextEncoder();
-let decoder = new TextDecoder();
-
-interface InstallPluginConfig {
-  buildPlugin: "dev" | "release";
-  printLog: boolean;
-  checkCache: boolean;
+const options: FetchOptions = {
+  name: "deno_argon2",
+  url: "./target/debug/",
 }
 
-export async function buildNativePlugin(forRelease = false) {
-  let cmd = ["cargo", "build"];
+const library = await dlopen(options, {
+  hash: { parameters: ["buffer", "usize"], result: "pointer", nonblocking: true },
+  verify: { parameters: ["buffer", "usize"], result: "pointer", nonblocking: true },
+});
 
-  if (forRelease) {
-    cmd.push("--release");
-  }
-
-  let buildNativePlugin = Deno.run({
-    cmd,
-    stdout: "piped",
-  });
-
-  await buildNativePlugin.output();
+function encode(s: string): Uint8Array {
+  return new TextEncoder().encode(s);
 }
 
-export async function installPlugin(
-  baseUrl: string,
-  config: Partial<InstallPluginConfig> = {},
+function decode(buf: Uint8Array): string {
+  return new TextDecoder().decode(buf);
+}
+
+function readPointer(v: Deno.PointerValue): Uint8Array {
+  const ptr = new Deno.UnsafePointerView(v)
+  const lengthBe = new Uint8Array(4)
+  const view = new DataView(lengthBe.buffer)
+  ptr.copyInto(lengthBe, 0)
+  const buf = new Uint8Array(view.getUint32(0))
+  ptr.copyInto(buf, 4)
+  return buf
+}
+
+export async function hash(
+  password: string,
+  options: Partial<HashOptions> = {},
 ) {
-  let shouldBuild = "buildPlugin" in config;
-
-  await checkPermissions(shouldBuild);
-
-  if (shouldBuild) {
-    await buildNativePlugin(config.buildPlugin === "release");
+  if (typeof password !== "string") {
+    throw new Argon2Error(
+      Argon2ErrorType.InvalidInput,
+      "Password argument must be a string.",
+    );
   }
 
-  let preparing = prepare({
-    name: "argon2",
-    printLog: config.printLog,
-    checkCache: config.checkCache,
-    urls: {
-      darwin: `${baseUrl}/libdeno_argon2.dylib`,
-      windows: `${baseUrl}/deno_argon2.dll`,
-      linux: `${baseUrl}/libdeno_argon2.so`,
-    },
-  });
+  const salt = options.salt ? options.salt : crypto.getRandomValues(
+    new Uint8Array(
+      Math.max(Math.round(Math.random() * 32), MIN_SALT_SIZE),
+    ),
+  );
 
-  return {
-    async hash(
-      password: string,
-      options: Partial<HashOptions> = {},
-    ) {
-      await preparing;
+  if (salt.length < MIN_SALT_SIZE) {
+    throw new Argon2Error(
+      Argon2ErrorType.InvalidInput,
+      `Input salt is too short: ${salt.length}`,
+    );
+  }
 
-      //@ts-ignore
-      let { argon2_hash } = Deno.core.ops();
+  const args = encode(JSON.stringify({
+    password,
+    options: {
+      ...options,
+      salt: [...salt.values()],
+      secret: options.secret ? [...options.secret.values()] : undefined,
+      data: options.data
+        ? [...encode(JSON.stringify(options.data)).values()]
+        : undefined,
+    }
+  }));
 
-      if (typeof password !== "string") {
-        throw new Argon2Error(
-          Argon2ErrorType.InvalidInput,
-          "Password argument must be a string.",
-        );
-      }
+  const result = await library.symbols.hash(
+    args,
+    args.byteLength,
+  ).then(
+    r => JSON.parse(decode(readPointer(r))) as { result: Array<number>, error: string | null } 
+  )
 
-      let salt = options.salt ? options.salt : crypto.getRandomValues(
-        new Uint8Array(
-          Math.max(Math.round(Math.random() * 32), MIN_SALT_SIZE),
-        ),
-      );
+  if (result.error) {
+    throw new Argon2Error(
+      Argon2ErrorType.Native,
+      "An error occurred executing `hash`",
+      result.error,
+    );
+  }
 
-      if (salt.length < MIN_SALT_SIZE) {
-        throw new Argon2Error(
-          Argon2ErrorType.InvalidInput,
-          `Input salt is too short: ${salt.length}`,
-        );
-      }
-
-      let args = encoder.encode(JSON.stringify({
-        password,
-        options: {
-          ...options,
-          salt: [...salt.values()],
-          secret: options.secret ? [...options.secret.values()] : undefined,
-          data: options.data
-            ? [...encoder.encode(JSON.stringify(options.data)).values()]
-            : undefined,
-        },
-      }));
-
-      let buf = new Uint8Array(1);
-      //@ts-ignore
-      let result = Deno.core.dispatch(argon2_hash, args, buf)!;
-
-      if (buf[0] !== 1) {
-        throw new Argon2Error(
-          Argon2ErrorType.Native,
-          "An error occurred executing `hash`",
-          extractNativeError(buf),
-        );
-      }
-
-      return decoder.decode(result);
-    },
-    async verify(
-      hash: string,
-      password: string,
-    ) {
-      await preparing;
-
-      //@ts-ignore
-      let { argon2_verify } = Deno.core.ops();
-
-      let args = encoder.encode(JSON.stringify({ password, hash }));
-
-      let buf = new Uint8Array(100);
-      //@ts-ignore
-      let result = Deno.core.dispatch(argon2_verify, args, buf)!;
-
-      if (buf[0] !== 1) {
-        throw new Argon2Error(
-          Argon2ErrorType.Native,
-          "An error occurred executing `verify`",
-          extractNativeError(buf),
-        );
-      }
-
-      return Boolean(result[0]);
-    },
-  };
+  return decode(Uint8Array.from(result.result));
 }
 
-async function checkPermissions(shouldBuild: boolean) {
-  let permissions = [
-    Deno.permissions.query({ name: "plugin" }),
-    Deno.permissions.query({ name: "read", path: "./.deno_plugins" }),
-    Deno.permissions.query({ name: "write", path: "./.deno_plugins" }),
-  ];
+export async function verify(
+  hash: string,
+  password: string,
+) {
+  const args = encode(JSON.stringify({
+    hash: hash,
+    password: password,
+  }))
+  const result = await library.symbols.verify(
+    args,
+    args.byteLength,
+  ).then(
+    r => JSON.parse(decode(readPointer(r))) as { result: boolean, error: string | null } 
+  )
 
-  if (shouldBuild) {
-    permissions.push(Deno.permissions.query({ name: "run" }));
-  }
-
-  let [pluginPermission, readPermission, writePermission, runPermissions] =
-    await Promise.all(permissions);
-
-  if (pluginPermission.state !== "granted") {
+  if (result.error) {
     throw new Argon2Error(
-      Argon2ErrorType.UnmeetPermission,
-      "Plugin permission is not set. Run the script with `--allow-plugin` flag.",
+      Argon2ErrorType.Native,
+      "An error occurred executing `verify`",
+      result.error,
     );
   }
 
-  if (readPermission.state !== "granted") {
-    throw new Argon2Error(
-      Argon2ErrorType.UnmeetPermission,
-      "Read permission is not set. Run the script with `--allow-read` flag.",
-    );
-  }
-
-  if (writePermission.state !== "granted") {
-    throw new Argon2Error(
-      Argon2ErrorType.UnmeetPermission,
-      "Write permission is not set. Run the script with `--allow-write` flag.",
-    );
-  }
-
-  if (shouldBuild && runPermissions && runPermissions.state !== "granted") {
-    throw new Argon2Error(
-      Argon2ErrorType.UnmeetPermission,
-      "Run permission is not set. Run the script with `--allow-run` flag.",
-    );
-  }
-}
-
-function extractNativeError(buf: Uint8Array) {
-  let errorBytes = buf.filter((byte) => byte !== 0);
-  let errorData = decoder.decode(errorBytes);
-  return errorData;
+  return result.result;
 }
