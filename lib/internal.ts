@@ -4,7 +4,7 @@ import { dlopen, FetchOptions } from "https://deno.land/x/plug/mod.ts";
 
 const options: FetchOptions = {
   name: "deno_argon2",
-  url: "./target/debug/",
+  url: "./target/release/",
 }
 
 const library = await dlopen(options, {
