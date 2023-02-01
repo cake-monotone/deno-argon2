@@ -78,7 +78,7 @@ pub extern "C" fn hash(ptr: *const u8, len: usize) -> *const u8 {
 
     let return_ptr = result.as_ptr();
     std::mem::forget(result);
-    return return_ptr;
+    return_ptr
 }
 
 
@@ -106,7 +106,7 @@ pub extern "C" fn verify(ptr: *const u8, len: usize) -> *const u8 {
 
     let return_ptr = result.as_ptr();
     std::mem::forget(result);
-    return return_ptr;
+    return_ptr
 }
 
 
