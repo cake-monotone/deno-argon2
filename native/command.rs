@@ -67,9 +67,9 @@ pub extern "C" fn free_buf(ptr: *mut u8, len: usize) {
 
 #[no_mangle]
 pub extern "C" fn hash(ptr: *const u8, len: usize) -> *const u8 {
-    let data_buf = unsafe{ std::slice::from_raw_parts(ptr, len) };
+    let params_buf = unsafe{ std::slice::from_raw_parts(ptr, len) };
     
-    let result = match hash_internal(data_buf) {
+    let result = match hash_internal(params_buf) {
         Ok(result) => {
             HashResult{
                 result: result.into_bytes(),
@@ -92,9 +92,9 @@ pub extern "C" fn hash(ptr: *const u8, len: usize) -> *const u8 {
 
 #[no_mangle]
 pub extern "C" fn verify(ptr: *const u8, len: usize) -> *const u8 {
-    let data_buf = unsafe{ std::slice::from_raw_parts(ptr, len) };
+    let params_buf = unsafe{ std::slice::from_raw_parts(ptr, len) };
 
-    let result = match verify_internal(data_buf) {
+    let result = match verify_internal(params_buf) {
         Ok(result) => {
             VerifyResult{
                 result,
@@ -115,8 +115,8 @@ pub extern "C" fn verify(ptr: *const u8, len: usize) -> *const u8 {
 }
 
 
-fn hash_internal(data_buf: &[u8]) -> Result<String, Error> {
-    let params: HashParams = serde_json::from_slice(data_buf)?;
+fn hash_internal(params_buf: &[u8]) -> Result<String, Error> {
+    let params: HashParams = serde_json::from_slice(params_buf)?;
     let salt = &params.options.salt;
 
     let mut config: Config = Config::default();
@@ -168,8 +168,8 @@ fn hash_internal(data_buf: &[u8]) -> Result<String, Error> {
     Ok(hash_encoded(&params.password.into_bytes(), salt, &config)?)
 }
 
-fn verify_internal(data_buf: &[u8]) -> Result<bool, Error> {
-    let options: VerifyParams = serde_json::from_slice(data_buf)?;
+fn verify_internal(params_buf: &[u8]) -> Result<bool, Error> {
+    let options: VerifyParams = serde_json::from_slice(params_buf)?;
 
     Ok(verify_encoded(
         &options.hash,

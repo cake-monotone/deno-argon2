@@ -5,7 +5,7 @@ import { dlopen, type FetchOptions } from "./deps.ts";
 const options: FetchOptions = {
   name: "deno_argon2",
   url: "./target/release/",
-  cache: "use"
+  cache: "reloadAll"
 }
 
 const lib = await dlopen(options, {
