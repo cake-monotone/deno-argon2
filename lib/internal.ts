@@ -1,7 +1,14 @@
 import { HashOptions, MIN_SALT_SIZE } from "./common.ts";
 import { Argon2Error, Argon2ErrorType } from "./error.ts";
+import { dlopen, type FetchOptions } from "./deps.ts";
 
-const lib = await Deno.dlopen("./target/release/libdeno_argon2.so", {
+const options: FetchOptions = {
+  name: "deno_argon2",
+  url: "./target/release/",
+  cache: "use"
+}
+
+const lib = await dlopen(options, {
   hash: {
     parameters: ["buffer", "usize"],
     result: "pointer",
@@ -11,6 +18,10 @@ const lib = await Deno.dlopen("./target/release/libdeno_argon2.so", {
     parameters: ["buffer", "usize"],
     result: "pointer",
     nonblocking: true,
+  },
+  free_buf: {
+    parameters: ["pointer", "usize"],
+    result: "void",
   },
 });
 
@@ -22,10 +33,16 @@ function decode(buf: Uint8Array): string {
   return new TextDecoder().decode(buf);
 }
 
-function readBuffer(v: Deno.PointerValue): Uint8Array {
+function readAndFreeBuffer(v: Deno.PointerValue): Uint8Array {
   const ptr = new Deno.UnsafePointerView(v);
   const len = new DataView(ptr.getArrayBuffer(4)).getUint32(0);
-  return new Uint8Array(ptr.getArrayBuffer(len, 4));
+
+  const buf = new Uint8Array(len);
+  ptr.copyInto(buf, 4);
+
+  lib.symbols.free_buf(v, len + 4);
+
+  return buf;
 }
 
 export async function hash(
@@ -64,16 +81,15 @@ export async function hash(
     },
   }));
 
-  const result = await lib.symbols.hash(
+  const result_buf_ptr = await lib.symbols.hash(
     args,
     args.byteLength,
-  ).then(
-    (r) =>
-      JSON.parse(decode(readBuffer(r))) as {
-        result: Array<number>;
-        error: string | null;
-      },
   );
+
+  const result = JSON.parse(decode(readAndFreeBuffer(result_buf_ptr))) as {
+    result: Array<number>;
+    error: string | null;
+  };
 
   if (result.error) {
     throw new Argon2Error(
@@ -94,16 +110,16 @@ export async function verify(
     hash: hash,
     password: password,
   }));
-  const result = await lib.symbols.verify(
+
+  const result_buf_ptr = await lib.symbols.verify(
     args,
     args.byteLength,
-  ).then(
-    (r) =>
-      JSON.parse(decode(readBuffer(r))) as {
-        result: boolean;
-        error: string | null;
-      },
-  );
+  )
+
+  const result = JSON.parse(decode(readAndFreeBuffer(result_buf_ptr))) as {
+    result: boolean;
+    error: string | null;
+  };
 
   if (result.error) {
     throw new Argon2Error(

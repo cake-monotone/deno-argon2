@@ -4,7 +4,7 @@ use bytes::Bytes;
 use crate::error::Error;
 
 #[derive(Deserialize)]
-pub struct HashOptions {
+struct HashOptions {
     salt: Bytes,
     secret: Option<Bytes>,
     data: Option<Bytes>,
@@ -28,6 +28,12 @@ struct HashParams {
     options: HashOptions,
 }
 
+#[derive(Serialize)]
+struct HashResult {
+    result: Vec<u8>,
+    error: Option<String>,
+}
+
 #[derive(Deserialize)]
 struct VerifyParams {
     password: String,
@@ -35,23 +41,28 @@ struct VerifyParams {
 }
 
 #[derive(Serialize)]
-pub struct HashResult {
-    result: Vec<u8>,
-    error: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct VerifyResult {
+struct VerifyResult {
     result: bool,
     error: Option<String>,
 }
 
-fn pack_result(s: &str) -> Vec<u8> {
+fn pack_into_buf(s: &str) -> *const u8 {
     let len = (s.len() as u32).to_be_bytes();
-    let mut packed = len.to_vec();
-    packed.extend_from_slice(s.as_bytes());
+    let mut buf = len.to_vec();
+    buf.extend_from_slice(s.as_bytes());
 
-    packed
+    let buf = buf.into_boxed_slice();
+    let buf_ptr = buf.as_ptr();
+
+    std::mem::forget(buf);
+    buf_ptr
+}
+
+#[no_mangle]
+pub extern "C" fn free_buf(ptr: *mut u8, len: usize) {
+    std::mem::drop(
+        unsafe { Box::from_raw(std::slice::from_raw_parts_mut(ptr, len)) }
+    );
 }
 
 #[no_mangle]
@@ -74,11 +85,8 @@ pub extern "C" fn hash(ptr: *const u8, len: usize) -> *const u8 {
     };
 
     let result = serde_json::to_string(&result).expect("failed to json-strigify the result");
-    let result = pack_result(&result);
 
-    let return_ptr = result.as_ptr();
-    std::mem::forget(result);
-    return_ptr
+    pack_into_buf(&result)
 }
 
 
@@ -102,11 +110,8 @@ pub extern "C" fn verify(ptr: *const u8, len: usize) -> *const u8 {
     };
 
     let result = serde_json::to_string(&result).expect("failed to json-strigify the result");
-    let result = pack_result(&result);
 
-    let return_ptr = result.as_ptr();
-    std::mem::forget(result);
-    return_ptr
+    pack_into_buf(&result)
 }
 
 
