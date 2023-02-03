@@ -84,7 +84,7 @@ requires `--allow-read`, `--allow-write`, `--allow-net` and `--allow-ffi`.
       --allow-read \
       --allow-write \
       --allow-net \
-      --allow-plugin \
+      --allow-ffi \
       --unstable \
       lib/mod.ts
     ```
