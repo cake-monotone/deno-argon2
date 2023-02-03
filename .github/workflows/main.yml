@@ -33,6 +33,7 @@ jobs:
           deno --version
           rustc --version
           cargo --version
+          echo ${{ github.ref }}
 
       - name: Cache cargo registry
         uses: actions/cache@v1
