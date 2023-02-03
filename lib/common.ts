@@ -1,3 +1,5 @@
+import { type FetchOptions } from "./deps.ts";
+
 export let MIN_SALT_SIZE = 8;
 
 export enum Variant {

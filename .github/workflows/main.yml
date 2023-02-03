@@ -59,9 +59,10 @@ jobs:
       - name: Build
         if: matrix.kind == 'test'
         run: cargo build --release --locked 
+
       - name: Test TypeScript
         if: matrix.kind == 'test'
-        run: deno test --allow-read --allow-write --allow-ffi --allow-run --allow-env --unstable tests/
+        run: ./test-with-local-build.sh
 
       - name: Release
         uses: softprops/action-gh-release@v1

@@ -1,14 +1,21 @@
-import { HashOptions, MIN_SALT_SIZE } from "./common.ts";
+import { HashOptions, MIN_SALT_SIZE, version } from "./common.ts";
 import { Argon2Error, Argon2ErrorType } from "./error.ts";
 import { dlopen, type FetchOptions } from "./deps.ts";
 
-const options: FetchOptions = {
+const FETCH_OPTIONS: FetchOptions = {
   name: "deno_argon2",
-  url: "./target/release/",
-  cache: "reloadAll"
+  // TODO: url should be changed to upstream's one.
+  url: `https://github.com/cake-monotone/deno-argon2/releases/download/v${version()}/`,
+  cache: "use",
 }
 
-const lib = await dlopen(options, {
+const _FETCH_OPTIONS_FOR_DEV: FetchOptions = {
+  ...FETCH_OPTIONS,
+  url: "./target/release/",
+  cache: "reloadAll",
+}
+
+const SYMBOLS = {
   hash: {
     parameters: ["buffer", "usize"],
     result: "pointer",
@@ -23,7 +30,9 @@ const lib = await dlopen(options, {
     parameters: ["pointer", "usize"],
     result: "void",
   },
-});
+} as const;
+
+const lib = await dlopen(FETCH_OPTIONS, SYMBOLS);
 
 function encode(s: string): Uint8Array {
   return new TextEncoder().encode(s);
