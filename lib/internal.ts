@@ -4,7 +4,7 @@ import { dlopen, type FetchOptions } from "./deps.ts";
 
 const FETCH_OPTIONS: FetchOptions = {
   name: "deno_argon2",
-  url: `https://github.com/fdionisi/deno-argon2/releases/download/v${version()}/`,
+  url: `https://github.com/cake-monotone/deno-argon2/releases/download/v${version()}/`,
   cache: "use",
 }
 
